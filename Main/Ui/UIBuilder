@@ -1,0 +1,1444 @@
+-- UI/UIBuilder.lua
+-- Full-featured animation editor — pure black/white palette, Roblox-native layout
+
+local UIBuilder = {}
+UIBuilder.__index = UIBuilder
+
+-- ── Layout ────────────────────────────────────────────────────
+local TOP_H    = 34
+local HIER_W   = 180
+local PROP_W   = 190
+local TL_H     = 220
+local HDR_H    = 22
+local RULER_H  = 20
+local TRACK_H  = 22
+local KF_SZ    = 8
+local PX_S     = 220   -- pixels per second at zoom=1
+
+-- ── Palette (black / white / grey only) ──────────────────────
+local C = {
+	bg       = Color3.fromRGB(38,38,38),
+	panel    = Color3.fromRGB(48,48,48),
+	header   = Color3.fromRGB(58,58,58),
+	row      = Color3.fromRGB(44,44,44),
+	rowAlt   = Color3.fromRGB(40,40,40),
+	rowSel   = Color3.fromRGB(68,68,68),
+	border   = Color3.fromRGB(22,22,22),
+	sep      = Color3.fromRGB(28,28,28),
+	ruler    = Color3.fromRGB(32,32,32),
+	tick     = Color3.fromRGB(72,72,72),
+	tickMaj  = Color3.fromRGB(150,150,150),
+	btn      = Color3.fromRGB(62,62,62),
+	btnHov   = Color3.fromRGB(82,82,82),
+	btnAct   = Color3.fromRGB(95,95,95),
+	btnActH  = Color3.fromRGB(115,115,115),
+	txt      = Color3.fromRGB(215,215,215),
+	txtDim   = Color3.fromRGB(130,130,130),
+	txtBrt   = Color3.fromRGB(255,255,255),
+	kf       = Color3.fromRGB(210,210,210),
+	kfSel    = Color3.fromRGB(255,255,255),
+	kfHov    = Color3.fromRGB(170,170,170),
+	ph       = Color3.fromRGB(255,255,255),
+	selBar   = Color3.fromRGB(200,200,200),
+	axX      = Color3.fromRGB(210,90,90),
+	axY      = Color3.fromRGB(90,200,90),
+	axZ      = Color3.fromRGB(90,140,220),
+	good     = Color3.fromRGB(140,210,140),
+	err      = Color3.fromRGB(210,100,100),
+	vp       = Color3.fromRGB(42,42,46),
+	vpFloor  = Color3.fromRGB(50,50,55),
+}
+
+-- ── Factories ─────────────────────────────────────────────────
+local function mkFrame(p)
+	local f = Instance.new("Frame"); f.BorderSizePixel = 0
+	f.BackgroundColor3 = p.bg or C.bg
+	f.Size = p.size or UDim2.new(1,0,1,0)
+	f.Position = p.pos or UDim2.new(0,0,0,0)
+	f.ClipsDescendants = p.clip or false
+	if p.zi then f.ZIndex = p.zi end
+	if p.par then f.Parent = p.par end
+	return f
+end
+
+local function mkLbl(p)
+	local l = Instance.new("TextLabel"); l.BackgroundTransparency = 1
+	l.TextColor3 = p.col or C.txt; l.TextSize = p.ts or 12
+	l.Font = p.font or Enum.Font.Gotham; l.Text = p.text or ""
+	l.TextXAlignment = p.xa or Enum.TextXAlignment.Left
+	l.TextYAlignment = p.ya or Enum.TextYAlignment.Center
+	l.TextTruncate = Enum.TextTruncate.AtEnd
+	l.Size = p.size or UDim2.new(1,0,1,0)
+	l.Position = p.pos or UDim2.new(0,0,0,0)
+	if p.zi then l.ZIndex = p.zi end
+	if p.par then l.Parent = p.par end
+	return l
+end
+
+local function mkBtn(p)
+	local b = Instance.new("TextButton"); b.BorderSizePixel = 0
+	b.AutoButtonColor = false
+	b.BackgroundColor3 = p.bg or C.btn
+	b.TextColor3 = p.col or C.txt
+	b.TextSize = p.ts or 12; b.Font = p.font or Enum.Font.Gotham
+	b.Text = p.text or ""; b.Size = p.size or UDim2.new(0,60,0,22)
+	b.Position = p.pos or UDim2.new(0,0,0,0)
+	if p.zi then b.ZIndex = p.zi end
+	if p.par then b.Parent = p.par end
+	local nb = p.bg or C.btn; local hb = p.hov or C.btnHov
+	b.MouseEnter:Connect(function() b.BackgroundColor3 = hb end)
+	b.MouseLeave:Connect(function() b.BackgroundColor3 = nb end)
+	if p.click then b.MouseButton1Click:Connect(p.click) end
+	return b
+end
+
+local function mkCorner(i, r)
+	local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, r or 3); c.Parent = i
+end
+
+local function mkDiv(par, pos, size, col)
+	local f = Instance.new("Frame"); f.BorderSizePixel = 0
+	f.BackgroundColor3 = col or C.border
+	f.Position = pos; f.Size = size; f.Parent = par; return f
+end
+
+local function mkScroll(p)
+	local s = Instance.new("ScrollingFrame"); s.BackgroundTransparency = 1
+	s.BorderSizePixel = 0
+	s.Size = p.size or UDim2.new(1,0,1,0)
+	s.Position = p.pos or UDim2.new(0,0,0,0)
+	s.ScrollBarThickness = p.thick or 5
+	s.ScrollBarImageColor3 = Color3.fromRGB(110,110,110)
+	s.CanvasSize = p.canvas or UDim2.new(0,0,0,0)
+	if p.dir then s.ScrollingDirection = p.dir end
+	if p.par then s.Parent = p.par end
+	return s
+end
+
+local function mkTBX(p)
+	local b = Instance.new("TextBox"); b.BorderSizePixel = 0
+	b.BackgroundColor3 = p.bg or C.bg; b.TextColor3 = p.col or C.txt
+	b.TextSize = p.ts or 12; b.Font = p.font or Enum.Font.Gotham
+	b.Text = p.text or ""; b.ClearTextOnFocus = false
+	b.Size = p.size or UDim2.new(0,50,0,20)
+	b.Position = p.pos or UDim2.new(0,0,0,0)
+	b.PlaceholderColor3 = C.txtDim
+	if p.par then b.Parent = p.par end
+	return b
+end
+
+-- ── Constructor ───────────────────────────────────────────────
+function UIBuilder.new(cfg)
+	local self = setmetatable({}, UIBuilder)
+	self.plugin      = cfg.plugin;     self.widget   = cfg.widget
+	self.cmdStack    = cfg.cmdStack;   self.animCtrl = cfg.animCtrl
+	self.rigCtrl     = cfg.rigCtrl;    self.tlCtrl   = cfg.tlCtrl
+	self.vpCtrl      = cfg.vpCtrl;     self.state    = cfg.state
+	self.selection   = cfg.selection;  self.UIS      = cfg.UIS
+	self.cbStart     = cfg.startPlayback
+	self.cbStop      = cfg.stopPlayback
+	self.cbScrub     = cfg.scrubTo
+
+	-- UI refs
+	self.ppBtn          = nil
+	self.timeLbl        = nil
+	self.statusLbl      = nil
+	self.hierScroll     = nil
+	self.propsBody      = nil
+	self.propsScroll    = nil
+	self.rulerFrame     = nil
+	self.trackScroll    = nil
+	self.tracksBg       = nil
+	self.labelsBody     = nil
+	self.playheadLine   = nil
+	self.playheadRuler  = nil
+	self.onionBtn       = nil
+	self.vpHeaderLbl    = nil   -- shows rig name + joint count
+
+	self.trackRows  = {}
+	self.labelRows  = {}
+
+	-- Drag states
+	self.phDrag  = false
+	self.kfDrag  = nil
+	self.rotDrag = { active = false }
+	self.camDrag = { active = false }
+
+	self._conns = {}
+	self._selBox = nil
+	self._autoKeyConns = {}
+	self._suppressAutoKey = false
+	self._exportDialog = nil
+	return self
+end
+
+function UIBuilder:_conn(sig, fn)
+	local c = sig:Connect(fn); table.insert(self._conns, c); return c
+end
+
+function UIBuilder:destroy()
+	for _, c in ipairs(self._conns) do pcall(c.Disconnect, c) end
+	self._conns = {}
+	if self._autoKeyConns then
+		for _, c in ipairs(self._autoKeyConns) do pcall(c.Disconnect, c) end
+		self._autoKeyConns = {}
+	end
+	if self._selBox then pcall(function() self._selBox:Destroy() end); self._selBox = nil end
+	if self._exportDialog then pcall(function() self._exportDialog:Destroy() end); self._exportDialog = nil end
+	if self.selection then pcall(function() self.selection:Set({}) end) end
+end
+
+-- ── Canvas helpers ────────────────────────────────────────────
+function UIBuilder:_cw()
+	local sw = self.trackScroll and self.trackScroll.AbsoluteSize.X or 800
+	return math.max(sw, self.state.duration * PX_S * self.tlCtrl.zoom, 400)
+end
+
+function UIBuilder:_t2x(t)
+	return (t / math.max(self.state.duration, 0.001)) * self:_cw()
+end
+
+function UIBuilder:_x2t(x)
+	return self.tlCtrl:snapTime(
+		math.clamp((x / self:_cw()) * self.state.duration, 0, self.state.duration))
+end
+
+function UIBuilder:setStatus(msg, ok)
+	if not self.statusLbl then return end
+	self.statusLbl.Text = msg
+	self.statusLbl.TextColor3 = ok and C.good or C.err
+end
+
+-- ── BUILD ─────────────────────────────────────────────────────
+function UIBuilder:build()
+	local root = mkFrame({ bg = C.bg, par = self.widget })
+
+	-- Top bar
+	local topBar = mkFrame({ bg = C.panel, size = UDim2.new(1,0,0,TOP_H), par = root })
+	mkDiv(topBar, UDim2.new(0,0,1,-1), UDim2.new(1,0,0,1), C.sep)
+	self:_buildTopBar(topBar)
+
+	-- Middle area
+	local mid = mkFrame({
+		bg   = C.bg,
+		size = UDim2.new(1,0,1,-(TOP_H + TL_H)),
+		pos  = UDim2.new(0,0,0,TOP_H),
+		par  = root
+	})
+
+	-- Hierarchy panel
+	local hierPanel = mkFrame({ bg = C.panel, size = UDim2.new(0,HIER_W,1,0), clip = true, par = mid })
+	mkDiv(hierPanel, UDim2.new(1,-1,0,0), UDim2.new(0,1,1,0), C.border)
+	self:_buildHierPanel(hierPanel)
+
+	-- Viewport
+	local vpPanel = mkFrame({
+		bg   = C.vp,
+		size = UDim2.new(1,-(HIER_W+PROP_W),1,0),
+		pos  = UDim2.new(0,HIER_W,0,0),
+		par  = mid
+	})
+	self:_buildViewport(vpPanel)
+
+	-- Properties panel
+	local propPanel = mkFrame({ bg = C.panel, size = UDim2.new(0,PROP_W,1,0), pos = UDim2.new(1,-PROP_W,0,0), par = mid })
+	mkDiv(propPanel, UDim2.new(0,0,0,0), UDim2.new(0,1,1,0), C.border)
+	self:_buildPropsPanel(propPanel)
+
+	-- Timeline area
+	local tlArea = mkFrame({
+		bg   = C.bg,
+		size = UDim2.new(1,0,0,TL_H),
+		pos  = UDim2.new(0,0,1,-TL_H),
+		par  = root
+	})
+	mkDiv(tlArea, UDim2.new(0,0,0,0), UDim2.new(1,0,0,1), C.sep)
+	self:_buildTimeline(tlArea)
+
+	self:_registerInput()
+end
+
+-- ── TOP BAR ───────────────────────────────────────────────────
+function UIBuilder:_buildTopBar(par)
+	local x = 6
+	local function advance(w) x = x + w + 4 end
+	local function sep() mkDiv(par, UDim2.new(0,x+2,0.2,0), UDim2.new(0,1,0.6,0), C.sep); x = x + 10 end
+
+	local function tb(text, w, bg2, hov2, fn)
+		local b = mkBtn({
+			text = text, ts = 12, font = Enum.Font.GothamBold, col = C.txtBrt,
+			size = UDim2.new(0,w,0,26), pos = UDim2.new(0,x,0.5,-13),
+			bg = bg2 or C.btn, hov = hov2 or C.btnHov, par = par, click = fn
+		})
+		mkCorner(b,3); advance(w); return b
+	end
+
+	tb("⏮",26,nil,nil, function() self.cbStop(); self.cbScrub(0) end)
+	tb("⏪",26,nil,nil, function() self.cbScrub(math.max(0, self.state.time-0.05)) end)
+
+	local pp = mkBtn({
+		text="▶", ts=14, font=Enum.Font.GothamBold, col=C.txtBrt,
+		size=UDim2.new(0,32,0,26), pos=UDim2.new(0,x,0.5,-13),
+		bg=C.btnAct, hov=C.btnActH, par=par
+	})
+	mkCorner(pp,3); self.ppBtn = pp; advance(32)
+	pp.MouseButton1Click:Connect(function()
+		if self.state.playing then self.cbStop() else self.cbStart() end
+	end)
+
+	tb("⏩",26,nil,nil, function() self.cbScrub(math.min(self.state.duration, self.state.time+0.05)) end)
+
+	local lp = tb("⟳",26)
+	local function syncLoop()
+		lp.BackgroundColor3 = self.state.looping and C.btnAct or C.btn
+	end
+	lp.MouseButton1Click:Connect(function() self.state.looping=not self.state.looping; syncLoop() end)
+	syncLoop()
+
+	sep()
+
+	mkLbl({text="SPD",pos=UDim2.new(0,x,0.5,-7),size=UDim2.new(0,24,0,14),ts=10,col=C.txtDim,par=par}); x=x+26
+	local spd = mkTBX({text="1.0",size=UDim2.new(0,36,0,22),pos=UDim2.new(0,x,0.5,-11),par=par}); mkCorner(spd,3); x=x+40
+	spd.FocusLost:Connect(function()
+		local v = tonumber(spd.Text)
+		self.state.speed = v and math.clamp(v,0.05,5) or self.state.speed
+		spd.Text = string.format("%.2f",self.state.speed)
+	end)
+
+	mkLbl({text="DUR",pos=UDim2.new(0,x,0.5,-7),size=UDim2.new(0,24,0,14),ts=10,col=C.txtDim,par=par}); x=x+26
+	local dur = mkTBX({text="2.0",size=UDim2.new(0,36,0,22),pos=UDim2.new(0,x,0.5,-11),par=par}); mkCorner(dur,3); x=x+40
+	dur.FocusLost:Connect(function()
+		local v = tonumber(dur.Text)
+		if v and v > 0.1 then
+			self.state.duration = math.clamp(v,0.1,300)
+			self.animCtrl.duration = self.state.duration
+			dur.Text = string.format("%.1f",self.state.duration)
+			self:_updateCanvas(); self:_redrawRuler()
+		else dur.Text = string.format("%.1f",self.state.duration) end
+	end)
+
+	sep()
+
+	local snp = tb("SNAP ✓",54)
+	local function syncSnap()
+		snp.Text = self.tlCtrl.snap and "SNAP ✓" or "SNAP ✗"
+		snp.BackgroundColor3 = self.tlCtrl.snap and C.btnAct or C.btn
+	end
+	snp.MouseButton1Click:Connect(function() self.tlCtrl.snap=not self.tlCtrl.snap; syncSnap() end)
+	syncSnap()
+
+	local osb = tb("ONION",46)
+	local function syncOnion()
+		osb.BackgroundColor3 = self.animCtrl.onionEnabled and C.btnAct or C.btn
+	end
+	osb.MouseButton1Click:Connect(function()
+		self.animCtrl.onionEnabled = not self.animCtrl.onionEnabled; syncOnion()
+	end)
+	syncOnion(); self.onionBtn = osb
+
+	tb("◆ Key",52,nil,nil, function() self:insertKF() end)
+
+	sep()
+	tb("↩",26,nil,nil, function() self:doUndo() end)
+	tb("↪",26,nil,nil, function() self:doRedo() end)
+	sep()
+	tb("Export",52,nil,nil, function() self:doExport() end)
+
+	local td = mkFrame({bg=C.bg,size=UDim2.new(0,68,0,22),pos=UDim2.new(1,-76,0.5,-11),par=par})
+	mkCorner(td,3)
+	self.timeLbl = mkLbl({text="0.00s",size=UDim2.new(1,0,1,0),ts=12,font=Enum.Font.GothamBold,
+		col=C.txtBrt,xa=Enum.TextXAlignment.Center,par=td})
+end
+
+-- ── HIERARCHY PANEL ───────────────────────────────────────────
+function UIBuilder:_buildHierPanel(par)
+	local hdr = mkFrame({bg=C.header,size=UDim2.new(1,0,0,HDR_H),par=par})
+	mkDiv(hdr,UDim2.new(0,0,1,-1),UDim2.new(1,0,0,1),C.border)
+	mkLbl({text="  JOINTS",size=UDim2.new(1,-100,1,0),ts=10,font=Enum.Font.GothamBold,col=C.txtDim,par=hdr})
+
+	local lb = mkBtn({text="Load",size=UDim2.new(0,42,0,16),pos=UDim2.new(1,-96,0.5,-8),
+		ts=10,par=hdr,click=function() self:doLoadRig() end})
+	mkCorner(lb,3)
+
+	-- +Item button — attaches a selected Workspace object to the active joint
+	local ab = mkBtn({text="+Item",size=UDim2.new(0,42,0,16),pos=UDim2.new(1,-50,0.5,-8),
+		ts=10,par=hdr,click=function() self:doAddItem() end})
+	mkCorner(ab,3)
+
+	local sb = mkFrame({bg=C.bg,size=UDim2.new(1,0,0,16),pos=UDim2.new(0,0,0,HDR_H),par=par})
+	self.statusLbl = mkLbl({text="Select rig → Load",pos=UDim2.new(0,6,0,0),
+		size=UDim2.new(1,-6,1,0),ts=9,col=C.txtDim,par=sb})
+
+	self.hierScroll = mkScroll({
+		size=UDim2.new(1,0,1,-(HDR_H+16)), pos=UDim2.new(0,0,0,HDR_H+16),
+		thick=4, par=par
+	})
+end
+
+function UIBuilder:updateHierarchy()
+	if not self.hierScroll then return end
+	for _, c in ipairs(self.hierScroll:GetChildren()) do c:Destroy() end
+	local names = self.rigCtrl:getSortedNames()
+	local y = 0
+	for idx, name in ipairs(names) do
+		local isSel = (self.rigCtrl.active == name)
+		local kc    = self.animCtrl:count(name)
+		local jName = self.rigCtrl.joints[name].joint.Name
+		local row = mkFrame({
+			bg   = isSel and C.rowSel or (idx%2==0 and C.rowAlt or C.row),
+			size = UDim2.new(1,0,0,26),
+			pos  = UDim2.new(0,0,0,y),
+			par  = self.hierScroll
+		})
+		mkDiv(row,UDim2.new(0,0,1,-1),UDim2.new(1,0,0,1),C.border)
+		if isSel then mkDiv(row,UDim2.new(0,0,0,0),UDim2.new(0,3,1,0),C.selBar) end
+
+		if kc > 0 then
+			local dot = mkFrame({bg=C.kf,size=UDim2.new(0,5,0,5),pos=UDim2.new(0,8,0.5,-2.5),par=row})
+			mkCorner(dot,3)
+		end
+		mkLbl({text=jName,pos=UDim2.new(0,18,0,0),size=UDim2.new(1,-36,1,0),ts=11,
+			col=isSel and C.txtBrt or C.txt,par=row})
+		if kc > 0 then
+			mkLbl({text=tostring(kc),pos=UDim2.new(1,-22,0,0),size=UDim2.new(0,20,1,0),
+				ts=10,col=C.txtDim,xa=Enum.TextXAlignment.Right,par=row})
+		end
+
+		local hit = Instance.new("TextButton"); hit.BackgroundTransparency=1
+		hit.Size=UDim2.new(1,0,1,0); hit.Text=""; hit.AutoButtonColor=false; hit.ZIndex=2; hit.Parent=row
+		local cn = name
+		hit.MouseEnter:Connect(function() if not isSel then row.BackgroundColor3=C.rowSel end end)
+		hit.MouseLeave:Connect(function() if not isSel then row.BackgroundColor3=(idx%2==0 and C.rowAlt or C.row) end end)
+		hit.MouseButton1Click:Connect(function()
+			self.rigCtrl:setActive(cn); self:updateHierarchy()
+			self:updateProperties(); self:_refreshTrackHL(); self:_highlightActivePart()
+		end)
+		y = y + 26
+	end
+	self.hierScroll.CanvasSize = UDim2.new(0,0,0,y)
+end
+
+-- ── VIEWPORT ──────────────────────────────────────────────────
+function UIBuilder:_buildViewport(par)
+	local hdr = mkFrame({bg=C.header,size=UDim2.new(1,0,0,HDR_H),par=par})
+	mkDiv(hdr,UDim2.new(0,0,1,-1),UDim2.new(1,0,0,1),C.border)
+	self.vpHeaderLbl = mkLbl({text="  PREVIEW  ·  MMB=orbit  ·  Scroll=zoom  ·  Click part=select",
+		size=UDim2.new(1,0,1,0),ts=10,col=C.txtDim,par=hdr})
+
+	local va = mkFrame({bg=C.vp,size=UDim2.new(1,0,1,-HDR_H),pos=UDim2.new(0,0,0,HDR_H),par=par})
+
+	local vp = Instance.new("ViewportFrame")
+	vp.BackgroundColor3 = C.vp; vp.BorderSizePixel = 0
+	vp.Size = UDim2.new(1,0,1,0)
+	vp.LightDirection = Vector3.new(-0.6,-1,-0.8)
+	vp.Ambient = Color3.fromRGB(120,120,130)
+	vp.LightColor = Color3.fromRGB(255,255,250)
+	vp.Parent = va
+
+	-- Floor grid — gives the viewport depth & ground reference
+	local function makeGridLine(sx, sy, sz, px, py, pz, col)
+		local p = Instance.new("Part")
+		p.Anchored = true; p.CanCollide = false; p.CastShadow = false
+		p.Material = Enum.Material.SmoothPlastic
+		p.Color = col or Color3.fromRGB(55,55,60)
+		p.Size = Vector3.new(sx, sy, sz)
+		p.CFrame = CFrame.new(px, py, pz)
+		p.Parent = vp
+		return p
+	end
+	-- Grid floor 10×10 squares, axis lines slightly brighter
+	for i = -5, 5 do
+		local axisCol = Color3.fromRGB(65,65,70)
+		makeGridLine(0.04, 0.04, 10, i, 0, 0, axisCol)  -- Z lines
+		makeGridLine(10,   0.04, 0.04, 0, 0, i, axisCol)  -- X lines
+	end
+	-- Slightly brighter center cross
+	makeGridLine(0.06, 0.06, 10, 0, 0.01, 0, Color3.fromRGB(80,80,90))
+	makeGridLine(10,   0.06, 0.06, 0, 0.01, 0, Color3.fromRGB(80,80,90))
+	-- Thin flat floor panel so shadows project
+	local floor = Instance.new("Part"); floor.Anchored = true; floor.CanCollide = false
+	floor.Material = Enum.Material.SmoothPlastic
+	floor.Color = Color3.fromRGB(44,44,48)
+	floor.Size = Vector3.new(10, 0.02, 10); floor.CFrame = CFrame.new(0,-0.01,0)
+	floor.Parent = vp
+
+	local cam = Instance.new("Camera")
+	cam.FieldOfView = 55
+	cam.CFrame = CFrame.new(0,4,12) * CFrame.Angles(math.rad(-10),0,0)
+	cam.Parent = vp; vp.CurrentCamera = cam
+
+	self.vpCtrl:setup(vp, cam)
+
+	-- Interaction overlay
+	local ov = Instance.new("TextButton"); ov.BackgroundTransparency=1
+	ov.BorderSizePixel=0; ov.Text=""; ov.Size=UDim2.new(1,0,1,0)
+	ov.ZIndex=10; ov.AutoButtonColor=false; ov.Parent=va
+
+	ov.InputBegan:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton3 then
+			self.camDrag = { active=true, startPos=Vector2.new(inp.Position.X,inp.Position.Y), startCF=cam.CFrame }
+		end
+	end)
+	ov.MouseWheelForward:Connect(function()
+		local f=cam.CFrame.LookVector
+		cam.CFrame=CFrame.new(cam.CFrame.Position+f*2, cam.CFrame.Position+f*100)
+	end)
+	ov.MouseWheelBackward:Connect(function()
+		local f=cam.CFrame.LookVector
+		cam.CFrame=CFrame.new(cam.CFrame.Position-f*2, cam.CFrame.Position+f*100)
+	end)
+end
+
+-- Update the viewport header to show rig name + joint count
+function UIBuilder:_updateVpHeader()
+	if not self.vpHeaderLbl then return end
+	local model = self.rigCtrl.model
+	if model then
+		local n = 0; for _ in pairs(self.rigCtrl.joints) do n = n + 1 end
+		self.vpHeaderLbl.Text = string.format("  %s  ·  %d joints  ·  MMB=orbit  ·  Scroll=zoom", model.Name, n)
+		self.vpHeaderLbl.TextColor3 = C.txt
+	else
+		self.vpHeaderLbl.Text = "  PREVIEW  ·  MMB=orbit  ·  Scroll=zoom  ·  Click part=select"
+		self.vpHeaderLbl.TextColor3 = C.txtDim
+	end
+end
+
+-- ── PROPERTIES PANEL ─────────────────────────────────────────
+function UIBuilder:_buildPropsPanel(par)
+	local hdr = mkFrame({bg=C.header,size=UDim2.new(1,0,0,HDR_H),par=par})
+	mkDiv(hdr,UDim2.new(0,0,1,-1),UDim2.new(1,0,0,1),C.border)
+	mkLbl({text="  PROPERTIES",size=UDim2.new(1,0,1,0),ts=10,font=Enum.Font.GothamBold,col=C.txtDim,par=hdr})
+
+	local sc = mkScroll({size=UDim2.new(1,0,1,-HDR_H),pos=UDim2.new(0,0,0,HDR_H),thick=4,canvas=UDim2.new(0,0,0,600),par=par})
+	self.propsScroll = sc
+	self.propsBody = mkFrame({bg=C.panel,size=UDim2.new(1,0,0,600),par=sc})
+	self:updateProperties()
+end
+
+function UIBuilder:updateProperties()
+	if not self.propsBody then return end
+	for _, c in ipairs(self.propsBody:GetChildren()) do c:Destroy() end
+	local y = 8
+
+	local function section(t)
+		mkLbl({text=t,pos=UDim2.new(0,8,0,y),size=UDim2.new(1,-8,0,12),
+			ts=9,font=Enum.Font.GothamBold,col=C.txtDim,par=self.propsBody})
+		y = y + 14
+	end
+	local function infoRow(l, v, vc)
+		mkLbl({text=l,pos=UDim2.new(0,8,0,y),size=UDim2.new(0.5,-4,0,15),ts=11,col=C.txtDim,par=self.propsBody})
+		mkLbl({text=tostring(v),pos=UDim2.new(0.5,0,0,y),size=UDim2.new(0.5,-6,0,15),ts=11,col=vc or C.txt,par=self.propsBody})
+		y = y + 17
+	end
+	local function divLine()
+		mkDiv(self.propsBody,UDim2.new(0,8,0,y),UDim2.new(1,-16,0,1),C.sep); y = y + 8
+	end
+
+	local name = self.rigCtrl.active
+	if not name then
+		mkLbl({text="No joint selected",pos=UDim2.new(0,10,0,y+10),size=UDim2.new(1,-10,0,18),
+			ts=11,col=C.txtDim,par=self.propsBody})
+		return
+	end
+	local info = self.rigCtrl.joints[name]; if not info then return end
+
+	section("JOINT")
+	infoRow("Name", info.joint.Name)
+	infoRow("Keyframes", self.animCtrl:count(name), C.kf)
+	infoRow("Time", string.format("%.3fs", self.state.time))
+
+	divLine()
+	section("ROTATION  ← drag →")
+	local dx, dy, dz = self.rigCtrl:getDeltaAngles(name)
+	for _, ax in ipairs({{"X",dx,C.axX},{"Y",dy,C.axY},{"Z",dz,C.axZ}}) do
+		local an, av, ac = ax[1], ax[2], ax[3]
+		local rf = mkFrame({bg=Color3.fromRGB(32,32,32),size=UDim2.new(1,-12,0,26),
+			pos=UDim2.new(0,6,0,y),par=self.propsBody})
+		mkCorner(rf,3)
+		mkDiv(rf,UDim2.new(0,0,0,0),UDim2.new(0,3,1,0),ac)
+		mkLbl({text=an,pos=UDim2.new(0,8,0,0),size=UDim2.new(0,12,1,0),ts=12,
+			font=Enum.Font.GothamBold,col=ac,par=rf})
+		mkLbl({text=string.format("%.2f°",av),pos=UDim2.new(0,22,0,0),size=UDim2.new(1,-40,1,0),
+			ts=12,col=C.txt,par=rf})
+		mkLbl({text="↔",pos=UDim2.new(1,-16,0,0),size=UDim2.new(0,14,1,0),ts=11,
+			col=C.txtDim,xa=Enum.TextXAlignment.Right,par=rf})
+
+		local g = Instance.new("TextButton"); g.BackgroundTransparency=1
+		g.Size=UDim2.new(1,0,1,0); g.Text=""; g.AutoButtonColor=false; g.ZIndex=2; g.Parent=rf
+		local ca, cn = an, name
+		g.InputBegan:Connect(function(inp)
+			if inp.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+			local cdx,cdy,cdz = self.rigCtrl:getDeltaAngles(cn)
+			local t = self.tlCtrl:snapTime(self.state.time)
+			local kf0 = self.animCtrl:getAt(cn,t)
+			-- FIX: Suppress auto-key during the drag so the C0 signal watcher
+			-- doesn't race with our explicit animCtrl:set calls below.
+			self._suppressAutoKey = true
+			self.rotDrag = {
+				active=true, axis=ca, name=cn,
+				startX=inp.Position.X, dx=cdx, dy=cdy, dz=cdz,
+				prevCF=kf0 and kf0.cf, dragT=t
+			}
+		end)
+		g.MouseEnter:Connect(function() rf.BackgroundColor3=Color3.fromRGB(44,44,44) end)
+		g.MouseLeave:Connect(function() rf.BackgroundColor3=Color3.fromRGB(32,32,32) end)
+		y = y + 30
+	end
+
+	divLine()
+	local akf = mkBtn({text="◆  Insert Keyframe",size=UDim2.new(1,-12,0,24),
+		pos=UDim2.new(0,6,0,y),ts=11,font=Enum.Font.GothamBold,par=self.propsBody,
+		click=function() self:insertKF() end})
+	mkCorner(akf,3); y = y + 28
+
+	local rst = mkBtn({text="↺  Reset to Rest",size=UDim2.new(1,-12,0,24),
+		pos=UDim2.new(0,6,0,y),ts=11,par=self.propsBody,
+		click=function() self:resetJoint() end})
+	mkCorner(rst,3); y = y + 28
+
+	divLine()
+	section("PRECISE INPUT (°)")
+	local pdx,pdy,pdz = self.rigCtrl:getDeltaAngles(name)
+	for _, ax in ipairs({{"X",pdx,C.axX},{"Y",pdy,C.axY},{"Z",pdz,C.axZ}}) do
+		local an, av, ac = ax[1], ax[2], ax[3]
+		mkLbl({text=an,pos=UDim2.new(0,8,0,y),size=UDim2.new(0,12,0,20),ts=11,
+			font=Enum.Font.GothamBold,col=ac,par=self.propsBody})
+		local tbx = mkTBX({text=string.format("%.2f",av),size=UDim2.new(1,-22,0,20),
+			pos=UDim2.new(0,20,0,y),par=self.propsBody})
+		mkCorner(tbx,3)
+		local ca, cn = an, name
+		tbx.FocusLost:Connect(function()
+			local v = tonumber(tbx.Text); if not v then tbx.Text=string.format("%.2f",av); return end
+			local ndx,ndy,ndz = self.rigCtrl:getDeltaAngles(cn)
+			if ca=="X" then ndx=v elseif ca=="Y" then ndy=v else ndz=v end
+			self:_applyAndKey(cn, ndx, ndy, ndz)
+		end)
+		y = y + 24
+	end
+
+	divLine()
+	section("ONION SKIN")
+	for _, row in ipairs({{"Before",self.animCtrl.onionBefore},{"After",self.animCtrl.onionAfter}}) do
+		local rl, rv = row[1], row[2]
+		mkLbl({text=rl,pos=UDim2.new(0,8,0,y),size=UDim2.new(0.5,-4,0,20),ts=11,col=C.txtDim,par=self.propsBody})
+		local tb = mkTBX({text=tostring(rv),size=UDim2.new(0.5,-10,0,20),pos=UDim2.new(0.5,2,0,y),par=self.propsBody})
+		mkCorner(tb,3)
+		local rn = rl
+		tb.FocusLost:Connect(function()
+			local v = tonumber(tb.Text)
+			if v and v >= 0 and v <= 8 then
+				if rn == "Before" then self.animCtrl.onionBefore = math.floor(v)
+				else self.animCtrl.onionAfter = math.floor(v) end
+			end
+			tb.Text = tostring(rn=="Before" and self.animCtrl.onionBefore or self.animCtrl.onionAfter)
+		end)
+		y = y + 24
+	end
+
+	local need = y + 16
+	if self.propsScroll then self.propsScroll.CanvasSize = UDim2.new(0,0,0,need) end
+	self.propsBody.Size = UDim2.new(1,0,0,need)
+end
+
+-- ── TIMELINE ─────────────────────────────────────────────────
+function UIBuilder:_buildTimeline(par)
+	local lc = mkFrame({bg=C.panel,size=UDim2.new(0,HIER_W,1,0),clip=true,par=par})
+	mkDiv(lc,UDim2.new(1,-1,0,0),UDim2.new(0,1,1,0),C.border)
+
+	local lHdr = mkFrame({bg=C.header,size=UDim2.new(1,0,0,RULER_H),par=lc})
+	mkDiv(lHdr,UDim2.new(0,0,1,-1),UDim2.new(1,0,0,1),C.border)
+	mkLbl({text="  TRACKS",size=UDim2.new(1,0,1,0),ts=10,font=Enum.Font.GothamBold,col=C.txtDim,par=lHdr})
+
+	self.labelsBody = mkFrame({bg=C.panel,size=UDim2.new(1,0,1,-RULER_H),
+		pos=UDim2.new(0,0,0,RULER_H),clip=true,par=lc})
+
+	local rc = mkFrame({bg=C.bg,size=UDim2.new(1,-HIER_W,1,0),pos=UDim2.new(0,HIER_W,0,0),clip=true,par=par})
+
+	local ruler = mkFrame({bg=C.ruler,size=UDim2.new(1,0,0,RULER_H),clip=true,par=rc})
+	mkDiv(ruler,UDim2.new(0,0,1,-1),UDim2.new(1,0,0,1),C.border)
+	self.rulerFrame = ruler
+
+	local rph = Instance.new("Frame"); rph.BackgroundColor3=C.ph
+	rph.BorderSizePixel=0; rph.Size=UDim2.new(0,1,1,0); rph.ZIndex=8; rph.Parent=ruler
+	self.playheadRuler = rph
+
+	ruler.InputBegan:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+			self.phDrag = true
+			local sx = self.trackScroll and self.trackScroll.CanvasPosition.X or 0
+			self.cbScrub(self:_x2t(inp.Position.X - ruler.AbsolutePosition.X + sx))
+		end
+	end)
+	ruler.InputChanged:Connect(function(inp)
+		if self.phDrag and inp.UserInputType == Enum.UserInputType.MouseMovement then
+			local sx = self.trackScroll and self.trackScroll.CanvasPosition.X or 0
+			self.cbScrub(self:_x2t(inp.Position.X - ruler.AbsolutePosition.X + sx))
+		end
+	end)
+	ruler.InputEnded:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 then self.phDrag = false end
+	end)
+
+	local sc = mkScroll({
+		size=UDim2.new(1,0,1,-RULER_H), pos=UDim2.new(0,0,0,RULER_H),
+		thick=6, canvas=UDim2.new(0,800,0,300), par=rc
+	})
+	sc.ScrollingDirection = Enum.ScrollingDirection.XY
+	self.trackScroll = sc
+
+	local bg = mkFrame({bg=C.bg,size=UDim2.new(0,800,0,300),par=sc})
+	self.tracksBg = bg
+
+	local ph = Instance.new("Frame"); ph.BackgroundColor3=C.ph
+	ph.BorderSizePixel=0; ph.Size=UDim2.new(0,1,1,0); ph.ZIndex=12; ph.Parent=bg
+	self.playheadLine = ph
+
+	sc.MouseWheelForward:Connect(function()
+		self.tlCtrl.zoom = math.clamp(self.tlCtrl.zoom*1.2, 0.05, 60)
+		self:_updateCanvas(); self:_redrawRuler(); self:_redrawKeyframes()
+	end)
+	sc.MouseWheelBackward:Connect(function()
+		self.tlCtrl.zoom = math.clamp(self.tlCtrl.zoom/1.2, 0.05, 60)
+		self:_updateCanvas(); self:_redrawRuler(); self:_redrawKeyframes()
+	end)
+
+	bg.InputBegan:Connect(function(inp)
+		if inp.UserInputType==Enum.UserInputType.MouseButton1 and not self.kfDrag then
+			self.phDrag=true; self.cbScrub(self:_x2t(inp.Position.X-bg.AbsolutePosition.X))
+		end
+	end)
+	bg.InputChanged:Connect(function(inp)
+		if inp.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+		local lx = inp.Position.X - bg.AbsolutePosition.X
+		if self.phDrag then self.cbScrub(self:_x2t(lx)) end
+		if self.kfDrag then
+			self.kfDrag.kfRef.t = self:_x2t(lx)
+			local tr = self.animCtrl.keyframes[self.kfDrag.name]
+			if tr then table.sort(tr,function(a,b) return a.t<b.t end) end
+			self:_redrawKeyframes(); self:updatePlayhead()
+		end
+	end)
+	bg.InputEnded:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+			if self.kfDrag then
+				local d = self.kfDrag
+				if math.abs(d.kfRef.t - d.startT) > 0.001 then
+					local n,ot,nt = d.name, d.startT, d.kfRef.t
+					self.cmdStack:push({
+						exec=function() self.animCtrl:move(n,ot,nt); self:_redrawKeyframes() end,
+						undo=function() self.animCtrl:move(n,nt,ot); self:_redrawKeyframes() end,
+					})
+				end
+				self.kfDrag=nil; self:_redrawKeyframes()
+			end
+			self.phDrag = false
+		end
+	end)
+
+	sc:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+		local cy = sc.CanvasPosition.Y
+		if self.labelsBody then
+			for _, lr in pairs(self.labelRows) do
+				local idx = lr:GetAttribute("_idx") or 0
+				lr.Position = UDim2.new(0,0,0,(idx-1)*TRACK_H - cy)
+			end
+		end
+		self:_redrawRuler()
+	end)
+end
+
+-- ── Track rebuild (on rig load) ───────────────────────────────
+function UIBuilder:buildAllTracks()
+	if self.tracksBg then
+		for _, c in ipairs(self.tracksBg:GetChildren()) do
+			if c ~= self.playheadLine then c:Destroy() end
+		end
+	end
+	if self.labelsBody then
+		for _, c in ipairs(self.labelsBody:GetChildren()) do c:Destroy() end
+	end
+	self.trackRows = {}; self.labelRows = {}
+
+	local names = self.rigCtrl:getSortedNames()
+	local th = math.max(#names * TRACK_H, 100)
+	local cw = self:_cw()
+
+	if self.tracksBg then self.tracksBg.Size = UDim2.new(0,cw,0,th) end
+	if self.trackScroll then self.trackScroll.CanvasSize = UDim2.new(0,cw,0,th) end
+
+	for idx, name in ipairs(names) do
+		local isSel = (self.rigCtrl.active == name)
+		local yo = (idx-1) * TRACK_H
+
+		local row = mkFrame({
+			bg   = isSel and C.rowSel or (idx%2==0 and C.rowAlt or C.row),
+			size = UDim2.new(1,0,0,TRACK_H),
+			pos  = UDim2.new(0,0,0,yo),
+			par  = self.tracksBg
+		})
+		mkDiv(row,UDim2.new(0,0,1,-1),UDim2.new(1,0,0,1),C.border)
+		if isSel then mkDiv(row,UDim2.new(0,0,0,0),UDim2.new(0,2,1,0),C.selBar) end
+
+		local kfCont = mkFrame({bg=C.bg,size=UDim2.new(1,0,1,0),par=row})
+		kfCont.BackgroundTransparency = 1
+
+		local hit = Instance.new("TextButton"); hit.BackgroundTransparency=1
+		hit.Size=UDim2.new(1,0,1,0); hit.Text=""; hit.AutoButtonColor=false; hit.ZIndex=2; hit.Parent=row
+		local cn = name
+		hit.MouseButton1Click:Connect(function()
+			self.rigCtrl:setActive(cn); self:updateHierarchy()
+			self:updateProperties(); self:_refreshTrackHL(); self:_highlightActivePart()
+		end)
+		self.trackRows[name] = { row=row, kfCont=kfCont }
+
+		if self.labelsBody then
+			local jName = self.rigCtrl.joints[name].joint.Name
+			local lr = mkFrame({
+				bg   = isSel and C.rowSel or (idx%2==0 and C.rowAlt or C.row),
+				size = UDim2.new(1,0,0,TRACK_H),
+				pos  = UDim2.new(0,0,0,yo),
+				par  = self.labelsBody
+			})
+			lr:SetAttribute("_idx", idx)
+			mkDiv(lr,UDim2.new(0,0,1,-1),UDim2.new(1,0,0,1),C.border)
+			if isSel then mkDiv(lr,UDim2.new(0,0,0,0),UDim2.new(0,3,1,0),C.selBar) end
+			mkLbl({text="  "..jName,size=UDim2.new(1,0,1,0),ts=11,
+				col=isSel and C.txtBrt or C.txtDim,par=lr})
+			local lh = Instance.new("TextButton"); lh.BackgroundTransparency=1
+			lh.Size=UDim2.new(1,0,1,0); lh.Text=""; lh.AutoButtonColor=false; lh.ZIndex=2; lh.Parent=lr
+			lh.MouseButton1Click:Connect(function()
+				self.rigCtrl:setActive(cn); self:updateHierarchy()
+				self:updateProperties(); self:_refreshTrackHL(); self:_highlightActivePart()
+			end)
+			self.labelRows[name] = lr
+		end
+	end
+
+	self:_updateCanvas(); self:_redrawKeyframes(); self:_redrawRuler(); self:updatePlayhead()
+end
+
+function UIBuilder:_updateCanvas()
+	local names = self.rigCtrl:getSortedNames()
+	local th = math.max(#names*TRACK_H, 100); local cw = self:_cw()
+	if self.tracksBg then self.tracksBg.Size = UDim2.new(0,cw,0,th) end
+	if self.trackScroll then self.trackScroll.CanvasSize = UDim2.new(0,cw,0,th) end
+end
+
+-- ── Keyframe redraw ───────────────────────────────────────────
+function UIBuilder:_redrawKeyframes()
+	for name, entry in pairs(self.trackRows) do
+		local kc = entry.kfCont
+		for _, c in ipairs(kc:GetChildren()) do c:Destroy() end
+		local track = self.animCtrl.keyframes[name]; if not track then continue end
+		for ki, kf in ipairs(track) do
+			local x    = math.floor(self:_t2x(kf.t))
+			local isSel = self.tlCtrl:isSelected(name, ki)
+			local hw   = KF_SZ + 6
+
+			local h = Instance.new("Frame"); h.BackgroundTransparency=1
+			h.Size=UDim2.new(0,hw,0,TRACK_H)
+			h.Position=UDim2.new(0,x-hw/2,0,0); h.ZIndex=4; h.Parent=kc
+
+			local d = Instance.new("TextButton")
+			d.BackgroundColor3 = isSel and C.kfSel or C.kf
+			d.BorderSizePixel=0; d.AutoButtonColor=false
+			d.Size=UDim2.new(0,KF_SZ,0,KF_SZ)
+			d.Position=UDim2.new(0.5,-KF_SZ/2,0.5,-KF_SZ/2)
+			d.Rotation=45; d.Text=""; d.ZIndex=5; d.Parent=h
+
+			d.MouseEnter:Connect(function() if not isSel then d.BackgroundColor3=C.kfHov end end)
+			d.MouseLeave:Connect(function() d.BackgroundColor3=isSel and C.kfSel or C.kf end)
+
+			local cn, ckf, cki = name, kf, ki
+			d.MouseButton1Down:Connect(function()
+				local add = self.UIS:IsKeyDown(Enum.KeyCode.LeftControl)
+				self.tlCtrl:selectKey(cn, cki, add)
+				self.rigCtrl:setActive(cn)
+				self.kfDrag = { name=cn, kfRef=ckf, startT=ckf.t }
+				self:updateHierarchy(); self:updateProperties(); self:_refreshTrackHL(); self:_highlightActivePart(); self:_redrawKeyframes()
+			end)
+			d.MouseButton2Click:Connect(function()
+				local t0, cf0 = ckf.t, ckf.cf
+				local cmd = {
+					exec=function() self.animCtrl:remove(cn,t0); self:_redrawKeyframes(); self:updateHierarchy() end,
+					undo=function() self.animCtrl:set(cn,t0,cf0); self:_redrawKeyframes(); self:updateHierarchy() end,
+				}
+				cmd.exec(); self.cmdStack:push(cmd)
+			end)
+		end
+	end
+end
+
+-- ── Ruler redraw ──────────────────────────────────────────────
+function UIBuilder:_redrawRuler()
+	if not self.rulerFrame then return end
+	for _, c in ipairs(self.rulerFrame:GetChildren()) do
+		if c ~= self.playheadRuler and (c:IsA("Frame") or c:IsA("TextLabel")) then
+			c:Destroy()
+		end
+	end
+
+	local w = self.rulerFrame.AbsoluteSize.X; if w <= 1 then return end
+	local sx = self.trackScroll and self.trackScroll.CanvasPosition.X or 0
+	local z  = self.tlCtrl.zoom
+
+	local step = 0.1
+	if z < 0.3 then step=1 elseif z < 0.7 then step=0.5 elseif z < 1.5 then step=0.2 elseif z > 6 then step=0.05 end
+
+	for i = 0, math.ceil(self.state.duration/step)+2 do
+		local t  = i*step; local rx = self:_t2x(t)-sx
+		if rx >= -2 and rx <= w+2 then
+			local maj = (i%5==0) or step >= 0.2
+			mkDiv(self.rulerFrame,
+				UDim2.new(0,math.floor(rx), maj and 0 or 0.5, 0),
+				UDim2.new(0,1, maj and 0.7 or 0.35, 0),
+				maj and C.tickMaj or C.tick
+			).ZIndex = 3
+			if maj then
+				local l = mkLbl({text=string.format("%.2f",t),
+					pos=UDim2.new(0,math.floor(rx)+2,0,0),size=UDim2.new(0,36,0.65,0),
+					ts=9,col=C.tickMaj,par=self.rulerFrame})
+				l.ZIndex = 3
+			end
+		end
+	end
+
+	if self.playheadRuler then
+		local sx2 = self.trackScroll and self.trackScroll.CanvasPosition.X or 0
+		self.playheadRuler.Position = UDim2.new(0, math.floor(self:_t2x(self.state.time)-sx2), 0, 0)
+		self.playheadRuler.ZIndex = 8
+	end
+end
+
+-- ── Playhead ──────────────────────────────────────────────────
+function UIBuilder:updatePlayhead()
+	if self.timeLbl then self.timeLbl.Text = string.format("%.2fs", self.state.time) end
+	local x = math.floor(self:_t2x(self.state.time))
+	if self.playheadLine then self.playheadLine.Position = UDim2.new(0,x,0,0) end
+	if self.playheadRuler then
+		local sx = self.trackScroll and self.trackScroll.CanvasPosition.X or 0
+		self.playheadRuler.Position = UDim2.new(0,x-sx,0,0)
+	end
+	if self.trackScroll and self.state.playing then
+		local sw = self.trackScroll.AbsoluteSize.X
+		local cx = self.trackScroll.CanvasPosition.X
+		if x < cx+20 or x > cx+sw-20 then
+			self.trackScroll.CanvasPosition = Vector2.new(math.max(0,x-sw*0.4), self.trackScroll.CanvasPosition.Y)
+		end
+	end
+end
+
+function UIBuilder:onPlayStateChanged()
+	if self.ppBtn then self.ppBtn.Text = self.state.playing and "⏸" or "▶" end
+	self._suppressAutoKey = self.state.playing
+end
+
+function UIBuilder:updateOnionSkin()
+	if not self.animCtrl.onionEnabled then
+		self.vpCtrl:clearGhosts(); return
+	end
+	local ghostData = self.animCtrl:getOnionTimes(self.state.time)
+	self.vpCtrl:updateOnionSkin(self.rigCtrl, self.animCtrl, ghostData)
+end
+
+-- ── Part highlight ────────────────────────────────────────────
+function UIBuilder:_highlightActivePart()
+	if self._selBox then
+		pcall(function() self._selBox:Destroy() end)
+		self._selBox = nil
+	end
+	local name = self.rigCtrl.active
+	if not name then return end
+	local info = self.rigCtrl.joints[name]
+	if not info or not info.part1 then return end
+	local sb = Instance.new("SelectionBox")
+	sb.Adornee = info.part1
+	sb.Color3 = Color3.fromRGB(255,255,255)
+	sb.LineThickness = 0.05
+	sb.SurfaceTransparency = 0.85
+	sb.SurfaceColor3 = Color3.fromRGB(255,255,255)
+	sb.Parent = game.CoreGui
+	self._selBox = sb
+	if self.selection then
+		pcall(function() self.selection:Set({ info.part1 }) end)
+	end
+end
+
+function UIBuilder:_refreshTrackHL()
+	local names = self.rigCtrl:getSortedNames()
+	for idx, name in ipairs(names) do
+		local isSel = (self.rigCtrl.active == name)
+		local bg2 = isSel and C.rowSel or (idx%2==0 and C.rowAlt or C.row)
+		local e = self.trackRows[name]; if e then e.row.BackgroundColor3 = bg2 end
+		local lr = self.labelRows[name]; if lr then
+			lr.BackgroundColor3 = bg2
+			for _, c in ipairs(lr:GetChildren()) do
+				if c:IsA("TextLabel") then c.TextColor3 = isSel and C.txtBrt or C.txtDim end
+			end
+		end
+	end
+end
+
+-- ── Actions ───────────────────────────────────────────────────
+function UIBuilder:doLoadRig()
+	self:setStatus("Scanning…", true)
+	task.defer(function()
+		-- FIX: Stop playback and reset time before loading new rig.
+		-- Previously, if you swapped rigs mid-animation the old time/state
+		-- would bleed into the new rig causing visual glitches.
+		self.cbStop()
+		self.state.time = 0
+		self._suppressAutoKey = false
+
+		local model, n = self.rigCtrl:tryLoad(self.selection)
+		if model and n > 0 then
+			-- Full reset of animation / command / selection state
+			self.animCtrl:clear()
+			self.cmdStack:clear()
+			self.tlCtrl:clearSelection()
+
+			-- Reset scrub position visually
+			if self.timeLbl then self.timeLbl.Text = "0.00s" end
+
+			-- Rebuild viewport with new rig
+			self.vpCtrl:build(self.rigCtrl)
+
+			self:setStatus(model.Name.." · "..n.." joints", true)
+			self:_insertRestPoseKeys()
+			self:updateHierarchy()
+			self:buildAllTracks()
+			self:updateProperties()
+			self:_updateVpHeader()
+			self:_setupAutoKey()
+
+			-- Scrub to 0 so the viewport shows rest pose
+			self.cbScrub(0)
+		else
+			self:setStatus("No Motor6D joints found", false)
+		end
+	end)
+end
+
+function UIBuilder:_insertRestPoseKeys()
+	for name, info in pairs(self.rigCtrl.joints) do
+		self.animCtrl:set(name, 0, info.origC0)
+	end
+end
+
+-- FIX: Auto-key reliability
+-- The C0 signal fires synchronously inside applyC0, so during a rotation drag
+-- it would race with our explicit animCtrl:set call. We now set _suppressAutoKey=true
+-- in the drag InputBegan handler (see updateProperties) and clear it here on release.
+-- This means: while dragging, only our explicit set() runs. On release, we push to
+-- cmdStack and re-enable auto-key for Studio's Rotate/Move tool to pick up changes.
+function UIBuilder:_setupAutoKey()
+	if self._autoKeyConns then
+		for _, c in ipairs(self._autoKeyConns) do pcall(c.Disconnect, c) end
+	end
+	self._autoKeyConns = {}
+
+	for name, info in pairs(self.rigCtrl.joints) do
+		local j = info.joint
+		local cn = name
+		local ok, conn = pcall(function()
+			return j:GetPropertyChangedSignal("C0"):Connect(function()
+				if self._suppressAutoKey then return end
+				local t = self.tlCtrl:snapTime(self.state.time)
+				local newCF = self.rigCtrl:getC0(cn)
+				local prev = self.animCtrl:getAt(cn, t)
+				local prevCF = prev and prev.cf
+				if prevCF and newCF:FuzzyEq(prevCF, 0.0001) then return end
+				self.animCtrl:set(cn, t, newCF)
+				if self.vpCtrl.cloneMap and self.vpCtrl.cloneMap[cn] then
+					pcall(function() self.vpCtrl.cloneMap[cn].C0 = newCF end)
+				end
+				self:_redrawKeyframes()
+				self:updateHierarchy()
+			end)
+		end)
+		if ok and conn then
+			table.insert(self._autoKeyConns, conn)
+			table.insert(self._conns, conn)
+		end
+	end
+end
+
+function UIBuilder:insertKF()
+	local name = self.rigCtrl.active
+	if not name then self:setStatus("Select a joint", false); return end
+	local t = self.tlCtrl:snapTime(self.state.time)
+	local newCF = self.rigCtrl:getC0(name)
+	local prev = self.animCtrl:getAt(name, t); local prevCF = prev and prev.cf
+	local cmd = {
+		exec=function() self.animCtrl:set(name,t,newCF); self:_redrawKeyframes(); self:updateHierarchy() end,
+		undo=function()
+			if prevCF then self.animCtrl:set(name,t,prevCF) else self.animCtrl:remove(name,t) end
+			self:_redrawKeyframes(); self:updateHierarchy()
+		end,
+	}
+	cmd.exec(); self.cmdStack:push(cmd)
+	self:setStatus(string.format("KF @ %.3fs", t), true)
+end
+
+function UIBuilder:resetJoint()
+	local name = self.rigCtrl.active; if not name then return end
+	local info = self.rigCtrl.joints[name]; if not info then return end
+	self:_applyAndKey(name, 0, 0, 0, info.origC0)
+	self:setStatus("Reset: "..name, true)
+end
+
+function UIBuilder:_applyAndKey(name, dx, dy, dz, absCF)
+	local info = self.rigCtrl.joints[name]; if not info then return end
+	local t = self.tlCtrl:snapTime(self.state.time)
+	local newCF = absCF or self.rigCtrl:buildC0(name, dx, dy, dz)
+	local prev = self.animCtrl:getAt(name, t); local prevCF = prev and prev.cf
+	self.rigCtrl:applyC0(name, newCF, self.vpCtrl.cloneMap)
+	self.animCtrl:set(name, t, newCF)
+	local cmd = {
+		exec=function()
+			self.rigCtrl:applyC0(name,newCF,self.vpCtrl.cloneMap)
+			self.animCtrl:set(name,t,newCF)
+			self:_redrawKeyframes(); self:updateHierarchy(); self:updateProperties()
+		end,
+		undo=function()
+			if prevCF then
+				self.rigCtrl:applyC0(name,prevCF,self.vpCtrl.cloneMap); self.animCtrl:set(name,t,prevCF)
+			else
+				self.rigCtrl:applyC0(name,info.origC0,self.vpCtrl.cloneMap); self.animCtrl:remove(name,t)
+			end
+			self:_redrawKeyframes(); self:updateHierarchy(); self:updateProperties()
+		end,
+	}
+	self.cmdStack:push(cmd); self:_redrawKeyframes(); self:updateHierarchy(); self:updateProperties()
+end
+
+function UIBuilder:doUndo()
+	if self.cmdStack:undo() then self:_redrawKeyframes(); self:updateHierarchy(); self:updateProperties() end
+end
+
+function UIBuilder:doRedo()
+	if self.cmdStack:redo() then self:_redrawKeyframes(); self:updateHierarchy(); self:updateProperties() end
+end
+
+function UIBuilder:doExport()
+	if not self.rigCtrl.model then self:setStatus("No rig loaded", false); return end
+	local ok, seq = pcall(function() return self.animCtrl:export(self.rigCtrl.joints) end)
+	if not ok or not seq then
+		self:setStatus("Export failed: " .. tostring(seq), false)
+		warn("[Export] Error:", seq)
+		return
+	end
+	self:_showExportDialog(seq)
+end
+
+function UIBuilder:_showExportDialog(seq)
+	if self._exportDialog then
+		pcall(function() self._exportDialog:Destroy() end)
+		self._exportDialog = nil
+	end
+
+	local overlay = mkFrame({
+		bg = Color3.fromRGB(0,0,0),
+		size = UDim2.new(1,0,1,0),
+		par = self.widget, zi = 100
+	})
+	overlay.BackgroundTransparency = 0.5
+	self._exportDialog = overlay
+
+	local dlg = mkFrame({
+		bg = C.panel,
+		size = UDim2.new(0,340,0,230),
+		pos = UDim2.new(0.5,-170,0.5,-115),
+		par = overlay, zi = 101
+	})
+	mkCorner(dlg, 6)
+	mkDiv(dlg, UDim2.new(0,0,0,0), UDim2.new(1,0,0,1), C.border)
+
+	local titleBar = mkFrame({bg=C.header,size=UDim2.new(1,0,0,30),par=dlg,zi=102})
+	mkCorner(titleBar,6)
+	mkDiv(titleBar,UDim2.new(0,0,1,-1),UDim2.new(1,0,0,1),C.border)
+	mkLbl({text="  Export Animation",size=UDim2.new(1,-36,1,0),ts=13,
+		font=Enum.Font.GothamBold,col=C.txtBrt,par=titleBar,zi=103})
+
+	local closeBtn = mkBtn({text="✕",size=UDim2.new(0,28,0,28),
+		pos=UDim2.new(1,-30,0,1),ts=13,par=titleBar,zi=104,
+		click=function()
+			pcall(function() overlay:Destroy() end)
+			self._exportDialog = nil
+		end})
+	mkCorner(closeBtn,4)
+
+	local y = 40
+
+	mkLbl({text="Save KeyframeSequence to Workspace:",
+		pos=UDim2.new(0,12,0,y),size=UDim2.new(1,-24,0,16),
+		ts=11,col=C.txtDim,par=dlg,zi=102})
+	y = y + 20
+
+	local nameBox = mkTBX({
+		text="Animation",
+		size=UDim2.new(1,-100,0,24),
+		pos=UDim2.new(0,12,0,y),
+		par=dlg
+	})
+	mkCorner(nameBox,3)
+	nameBox.ZIndex = 102
+
+	local saveWsBtn = mkBtn({
+		text="Save",
+		size=UDim2.new(0,76,0,24),
+		pos=UDim2.new(1,-88,0,y),
+		ts=11,font=Enum.Font.GothamBold,
+		par=dlg,zi=102,
+		click=function()
+			seq.Name = nameBox.Text ~= "" and nameBox.Text or "Animation"
+			local ok2, err = pcall(function() seq.Parent = game.Workspace end)
+			if ok2 then
+				self:setStatus("Saved '" .. seq.Name .. "' to Workspace", true)
+			else
+				self:setStatus("Save failed: " .. tostring(err), false)
+				warn("[Export Save]", err)
+			end
+			pcall(function() overlay:Destroy() end)
+			self._exportDialog = nil
+		end
+	})
+	mkCorner(saveWsBtn,3)
+	y = y + 34
+
+	mkDiv(dlg,UDim2.new(0,12,0,y),UDim2.new(1,-24,0,1),C.sep); y = y + 10
+
+	mkLbl({text="Or save inside the rig model:",
+		pos=UDim2.new(0,12,0,y),size=UDim2.new(1,-24,0,16),
+		ts=11,col=C.txtDim,par=dlg,zi=102})
+	y = y + 20
+
+	local saveRigBtn = mkBtn({
+		text="Save inside " .. (self.rigCtrl.model and self.rigCtrl.model.Name or "Rig"),
+		size=UDim2.new(1,-24,0,26),
+		pos=UDim2.new(0,12,0,y),
+		ts=11,font=Enum.Font.GothamBold,
+		par=dlg,zi=102,
+		click=function()
+			if self.rigCtrl.model then
+				seq.Name = nameBox.Text ~= "" and nameBox.Text or "Animation"
+				local ok2, err = pcall(function() seq.Parent = self.rigCtrl.model end)
+				if ok2 then
+					self:setStatus("Saved inside " .. self.rigCtrl.model.Name, true)
+				else
+					self:setStatus("Save failed: " .. tostring(err), false)
+				end
+			end
+			pcall(function() overlay:Destroy() end)
+			self._exportDialog = nil
+		end
+	})
+	mkCorner(saveRigBtn,3)
+	y = y + 34
+
+	mkDiv(dlg,UDim2.new(0,12,0,y),UDim2.new(1,-24,0,1),C.sep); y = y + 10
+
+	mkLbl({text="To publish online: Plugins → Animation Editor → Save.",
+		pos=UDim2.new(0,12,0,y),size=UDim2.new(1,-24,0,28),
+		ts=10,col=C.txtDim,par=dlg,zi=102})
+end
+
+-- ── Add Item ─────────────────────────────────────────────────
+-- Select an object in the Explorer, pick a joint in the hierarchy, press +Item.
+-- The object is parented into the rig model and a new Motor6D is created from
+-- the active joint's Part1 to the object's root part.
+function UIBuilder:doAddItem()
+	if not self.rigCtrl.model then
+		self:setStatus("Load a rig first", false); return
+	end
+	local sel = self.selection:Get()
+	if #sel == 0 then
+		self:setStatus("Select object(s) in Explorer, then press +Item", false); return
+	end
+	local activeName = self.rigCtrl.active
+	if not activeName then
+		self:setStatus("Select a joint to attach to first", false); return
+	end
+	local info = self.rigCtrl.joints[activeName]
+	if not info or not info.part1 then
+		self:setStatus("Active joint has no Part1", false); return
+	end
+	local attachTo = info.part1
+	local added = 0
+
+	for _, obj in ipairs(sel) do
+		if obj == self.rigCtrl.model then continue end
+		local part = nil
+		if obj:IsA("BasePart") then
+			part = obj
+		elseif obj:IsA("Model") then
+			part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+		end
+		if not part then continue end
+		if part:IsDescendantOf(self.rigCtrl.model) then
+			self:setStatus(obj.Name .. " already in rig", false); continue
+		end
+
+		obj.Parent = self.rigCtrl.model
+
+		local m = Instance.new("Motor6D")
+		m.Name  = obj.Name .. "_joint"
+		m.Part0 = attachTo
+		m.Part1 = part
+		m.C0    = attachTo.CFrame:Inverse() * part.CFrame  -- align to current world position
+		m.C1    = CFrame.new()
+		m.Parent = attachTo
+		added = added + 1
+	end
+
+	if added == 0 then return end
+
+	self:setStatus("Added " .. added .. " item(s) → " .. activeName, true)
+
+	task.defer(function()
+		local model = self.rigCtrl.model
+		local n = self.rigCtrl:load(model)
+		if n > 0 then
+			self.vpCtrl:build(self.rigCtrl)
+			self:_insertRestPoseKeys()
+			self:updateHierarchy(); self:buildAllTracks(); self:updateProperties()
+			self:_setupAutoKey(); self:_updateVpHeader()
+		end
+	end)
+end
+
+-- ── Global input ──────────────────────────────────────────────
+function UIBuilder:_registerInput()
+	local UIS = self.UIS
+
+	self:_conn(UIS.InputChanged, function(inp)
+		if inp.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+		local pos = Vector2.new(inp.Position.X, inp.Position.Y)
+
+		if self.rotDrag.active then
+			local rd = self.rotDrag
+			local delta = (pos.X - rd.startX) * 0.5
+			local ndx = rd.dx + (rd.axis=="X" and delta or 0)
+			local ndy = rd.dy + (rd.axis=="Y" and delta or 0)
+			local ndz = rd.dz + (rd.axis=="Z" and delta or 0)
+			local newCF = self.rigCtrl:buildC0(rd.name, ndx, ndy, ndz)
+			-- _suppressAutoKey=true was set on drag start so this applyC0 won't
+			-- double-fire the auto-key watcher
+			self.rigCtrl:applyC0(rd.name, newCF, self.vpCtrl.cloneMap)
+			-- Explicitly write keyframe at the captured drag time
+			self.animCtrl:set(rd.name, rd.dragT, newCF)
+			self:updateProperties(); self:_redrawKeyframes(); self:updateHierarchy()
+		end
+
+		if self.camDrag.active and self.camDrag.startPos and self.vpCtrl.camera then
+			local cam = self.vpCtrl.camera
+			local d = pos - self.camDrag.startPos
+			local center = Vector3.new(0,2,0)
+			if self.vpCtrl.clone then
+				local ok2, cf2 = pcall(function() return self.vpCtrl.clone:GetBoundingBox() end)
+				if ok2 and cf2 then center = cf2.Position end
+			end
+			local fc = self.camDrag.startCF.Position - center
+			local yaw   = CFrame.fromAxisAngle(Vector3.new(0,1,0), math.rad(-d.X*0.4))
+			local pitch = CFrame.Angles(math.rad(-d.Y*0.4),0,0)
+			cam.CFrame = CFrame.new(center + (yaw*(pitch*CFrame.new(fc))).Position, center)
+		end
+	end)
+
+	self:_conn(UIS.InputEnded, function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+			if self.rotDrag.active then
+				local rd = self.rotDrag
+				local finalCF = self.rigCtrl:getC0(rd.name)
+				if rd.prevCF and not finalCF:FuzzyEq(rd.prevCF, 0.0001) then
+					local cn, ct, prev = rd.name, rd.dragT, rd.prevCF
+					self.cmdStack:push({
+						exec=function()
+							self.rigCtrl:applyC0(cn,finalCF,self.vpCtrl.cloneMap)
+							self.animCtrl:set(cn,ct,finalCF)
+							self:_redrawKeyframes(); self:updateHierarchy(); self:updateProperties()
+						end,
+						undo=function()
+							self.rigCtrl:applyC0(cn,prev,self.vpCtrl.cloneMap)
+							self.animCtrl:set(cn,ct,prev)
+							self:_redrawKeyframes(); self:updateHierarchy(); self:updateProperties()
+						end,
+					})
+				end
+				self.rotDrag = { active=false }
+				-- FIX: Re-enable auto-key after drag ends (was disabled in InputBegan)
+				self._suppressAutoKey = self.state.playing
+				self:updateProperties()
+			end
+		end
+		if inp.UserInputType == Enum.UserInputType.MouseButton3 then
+			self.camDrag = { active=false }
+		end
+	end)
+
+	self:_conn(UIS.InputBegan, function(inp, gpe)
+		if gpe then return end
+		if inp.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+		local kc = inp.KeyCode
+
+		if ctrl and kc==Enum.KeyCode.Z then self:doUndo()
+		elseif ctrl and kc==Enum.KeyCode.Y then self:doRedo()
+		elseif ctrl and kc==Enum.KeyCode.C then
+			local nm = self.rigCtrl.active
+			if nm then self.tlCtrl.clipboard = { name=nm, cf=self.rigCtrl:getC0(nm) } end
+		elseif ctrl and kc==Enum.KeyCode.V then
+			local cb = self.tlCtrl.clipboard
+			if cb and self.rigCtrl.active then
+				self:_applyAndKey(self.rigCtrl.active, 0,0,0, cb.cf)
+			end
+		elseif kc==Enum.KeyCode.Space then
+			if self.state.playing then self.cbStop() else self.cbStart() end
+		elseif kc==Enum.KeyCode.Delete or kc==Enum.KeyCode.Backspace then
+			local toRemove = {}
+			for key in pairs(self.tlCtrl.selected) do
+				local sep = key:find("|")
+				if sep then
+					local sn = key:sub(1,sep-1); local ki = tonumber(key:sub(sep+1))
+					local tr = self.animCtrl.keyframes[sn]
+					if tr and ki and tr[ki] then
+						table.insert(toRemove, { name=sn, t=tr[ki].t, cf=tr[ki].cf })
+					end
+				end
+			end
+			for _, r in ipairs(toRemove) do
+				local rn,rt,rc = r.name, r.t, r.cf
+				local cmd = {
+					exec=function() self.animCtrl:remove(rn,rt); self:_redrawKeyframes(); self:updateHierarchy() end,
+					undo=function() self.animCtrl:set(rn,rt,rc); self:_redrawKeyframes(); self:updateHierarchy() end,
+				}
+				cmd.exec(); self.cmdStack:push(cmd)
+			end
+			self.tlCtrl:clearSelection()
+		end
+	end)
+
+	-- Click in Studio scene to select joint by part
+	self:_conn(UIS.InputBegan, function(inp, gpe)
+		if gpe then return end
+		if inp.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+		if not self.rigCtrl.model then return end
+		local mouse = self.plugin:GetMouse()
+		local target = mouse.Target; if not target then return end
+		local jn = self.rigCtrl:jointForPart(target)
+		if not jn then
+			local cur = target.Parent; local depth = 0
+			while cur and depth < 6 do
+				if cur:IsA("BasePart") then jn = self.rigCtrl:jointForPart(cur); if jn then break end end
+				cur = cur.Parent; depth = depth + 1
+			end
+		end
+		if jn then
+			self.rigCtrl:setActive(jn)
+			self:updateHierarchy(); self:updateProperties(); self:_refreshTrackHL(); self:_highlightActivePart()
+			self:setStatus("Selected: "..jn, true)
+		end
+	end)
+end
+
+return UIBuilder

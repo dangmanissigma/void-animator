@@ -1,0 +1,40 @@
+-- Modules/CommandStack.lua
+local CommandStack = {}
+CommandStack.__index = CommandStack
+local MAX = 150
+
+function CommandStack.new()
+	return setmetatable({ stack = {}, cursor = 0 }, CommandStack)
+end
+
+function CommandStack:push(cmd)
+	for i = self.cursor + 1, #self.stack do self.stack[i] = nil end
+	self.cursor = self.cursor + 1
+	self.stack[self.cursor] = cmd
+	if self.cursor > MAX then
+		table.remove(self.stack, 1)
+		self.cursor = self.cursor - 1
+	end
+end
+
+function CommandStack:undo()
+	if self.cursor < 1 then return false end
+	local ok, err = pcall(self.stack[self.cursor].undo)
+	if not ok then warn("[Undo]", err) end
+	self.cursor = self.cursor - 1
+	return true
+end
+
+function CommandStack:redo()
+	if self.cursor >= #self.stack then return false end
+	self.cursor = self.cursor + 1
+	local ok, err = pcall(self.stack[self.cursor].exec)
+	if not ok then warn("[Redo]", err) end
+	return true
+end
+
+function CommandStack:clear() self.stack = {}; self.cursor = 0 end
+function CommandStack:canUndo() return self.cursor >= 1 end
+function CommandStack:canRedo() return self.cursor < #self.stack end
+
+return CommandStack

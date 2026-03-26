@@ -1,0 +1,158 @@
+-- Main.server.lua
+local RunService = game:GetService("RunService")
+local Selection  = game:GetService("Selection")
+local UIS        = game:GetService("UserInputService")
+
+local root = script
+
+local CommandStack       = require(root.Modules.CommandStack)
+local AnimController     = require(root.Modules.AnimController)
+local RigController      = require(root.Modules.RigController)
+local TimelineController = require(root.Modules.TimelineController)
+local ViewportController = require(root.Modules.ViewportController)
+local UIBuilder          = require(root.UI.UIBuilder)
+
+-- ── Toolbar ───────────────────────────────────────────────────
+local toolbar   = plugin:CreateToolbar("Void Anim")
+local toggleBtn = toolbar:CreateButton("Anim Editor", "Open Animation Editor", "rbxassetid://7072706796")
+
+local widgetInfo = DockWidgetPluginGuiInfo.new(
+	Enum.InitialDockState.Float, false, false, 1440, 760, 1000, 520
+)
+local widget = plugin:CreateDockWidgetPluginGui("VoidAnimFull_v1", widgetInfo)
+widget.Title = "Animation Editor"
+
+-- ── Shared playback state ─────────────────────────────────────
+local state = {
+	time     = 0,
+	playing  = false,
+	looping  = false,
+	speed    = 1,
+	duration = 2,
+	lastTick = 0,
+	conn     = nil,
+}
+
+-- ── Controllers ───────────────────────────────────────────────
+local cmdStack = CommandStack.new()
+local animCtrl = AnimController.new()
+local rigCtrl  = RigController.new()
+local tlCtrl   = TimelineController.new()
+local vpCtrl   = ViewportController.new()
+local ui       = nil
+
+-- ── Pose evaluation ───────────────────────────────────────────
+local function applyPose(t)
+	if ui then ui._suppressAutoKey = true end
+	for name in pairs(rigCtrl.joints) do
+		local cf = animCtrl:evaluate(name, t)
+		if cf then rigCtrl:applyC0(name, cf, vpCtrl.cloneMap) end
+	end
+	if ui then ui._suppressAutoKey = state.playing end
+end
+
+-- ── Playback ─────────────────────────────────────────────────
+local function stopPlayback()
+	if state.conn then state.conn:Disconnect(); state.conn = nil end
+	state.playing = false
+	if ui then ui:onPlayStateChanged() end
+end
+
+local function startPlayback()
+	if state.playing then return end
+	if state.time >= state.duration then state.time = 0 end
+	state.playing  = true
+	state.lastTick = tick()
+	if ui then ui:onPlayStateChanged() end
+	state.conn = RunService.Heartbeat:Connect(function()
+		local now = tick()
+		local dt  = (now - state.lastTick) * state.speed
+		state.lastTick = now
+		state.time     = state.time + dt
+		if state.time >= state.duration then
+			if state.looping then
+				state.time = state.time % state.duration
+			else
+				state.time = state.duration
+				stopPlayback()
+			end
+		end
+		applyPose(state.time)
+		if ui then ui:updatePlayhead() end
+	end)
+end
+
+local function scrubTo(t)
+	state.time = math.clamp(t, 0, state.duration)
+	applyPose(state.time)
+	if ui then ui:updatePlayhead() end
+end
+
+-- ── Prop / onion refresh ──────────────────────────────────────
+local refreshConn = nil
+local acc = 0
+local function startRefresh()
+	if refreshConn then return end
+	refreshConn = RunService.Heartbeat:Connect(function(dt)
+		if not widget.Enabled or not ui then return end
+		acc = acc + dt
+		if acc >= 0.08 then
+			acc = 0
+			-- FIX: Don't rebuild props while rotation drag is active OR a TextBox has focus
+			-- This prevents the precise-input boxes from losing focus every 0.08s
+			local isRotDragging = ui.rotDrag and ui.rotDrag.active
+			local isFocused     = UIS:GetFocusedTextBox() ~= nil
+			if not isRotDragging and not isFocused then
+				ui:updateProperties()
+			end
+			ui:updateOnionSkin()
+		end
+	end)
+end
+local function stopRefresh()
+	if refreshConn then refreshConn:Disconnect(); refreshConn = nil end
+	acc = 0
+end
+
+-- ── Build / Destroy ───────────────────────────────────────────
+local function buildUI()
+	for _, c in ipairs(widget:GetChildren()) do c:Destroy() end
+	if ui then ui:destroy() end
+	animCtrl.duration = state.duration
+	ui = UIBuilder.new({
+		plugin        = plugin,
+		widget        = widget,
+		cmdStack      = cmdStack,
+		animCtrl      = animCtrl,
+		rigCtrl       = rigCtrl,
+		tlCtrl        = tlCtrl,
+		vpCtrl        = vpCtrl,
+		state         = state,
+		selection     = Selection,
+		UIS           = UIS,
+		startPlayback = startPlayback,
+		stopPlayback  = stopPlayback,
+		scrubTo       = scrubTo,
+	})
+	ui:build()
+	startRefresh()
+end
+
+local function destroyUI()
+	stopPlayback()
+	stopRefresh()
+	if ui then ui:destroy(); ui = nil end
+	if rigCtrl.model then rigCtrl:restoreAll(vpCtrl.cloneMap) end
+	vpCtrl:destroy()
+end
+
+-- ── Widget lifecycle ──────────────────────────────────────────
+toggleBtn.Click:Connect(function()
+	widget.Enabled = not widget.Enabled
+	if widget.Enabled then buildUI() else destroyUI() end
+end)
+widget:GetPropertyChangedSignal("Enabled"):Connect(function()
+	if not widget.Enabled then destroyUI() end
+end)
+plugin.Unloading:Connect(destroyUI)
+if widget.Enabled then buildUI() end

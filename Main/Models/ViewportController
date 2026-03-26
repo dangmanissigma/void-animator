@@ -1,0 +1,122 @@
+-- Modules/ViewportController.lua
+local ViewportController = {}
+ViewportController.__index = ViewportController
+
+function ViewportController.new()
+	return setmetatable({
+		clone    = nil,
+		cloneMap = {},   -- [uniqueName] = cloned Motor6D
+		ghosts   = {},   -- onion skin ghost models
+		camera   = nil,
+		vpFrame  = nil,
+	}, ViewportController)
+end
+
+function ViewportController:setup(vpFrame, camera)
+	self.vpFrame = vpFrame
+	self.camera  = camera
+end
+
+function ViewportController:build(rigCtrl)
+	-- Destroy old clone
+	if self.clone then self.clone:Destroy(); self.clone = nil end
+	self:clearGhosts()
+	self.cloneMap = {}
+	local model = rigCtrl.model
+	if not model or not self.vpFrame then return end
+
+	local ok, clone = pcall(function() return model:Clone() end)
+	if not ok or not clone then return end
+
+	-- Disable all scripts in clone
+	for _, s in ipairs(clone:GetDescendants()) do
+		if s:IsA("BaseScript") or s:IsA("ModuleScript") then s.Disabled = true end
+	end
+	clone.Parent = self.vpFrame
+	self.clone = clone
+
+	-- Map unique joint names to cloned joints
+	for uname, info in pairs(rigCtrl.joints) do
+		local jName  = info.joint.Name
+		local pName  = info.joint.Parent and info.joint.Parent.Name or ""
+		for _, d in ipairs(clone:GetDescendants()) do
+			if d.Name == jName and (d.Parent and d.Parent.Name or "") == pName then
+				self.cloneMap[uname] = d; break
+			end
+		end
+	end
+
+	self:frameCamera()
+end
+
+function ViewportController:frameCamera()
+	if not self.camera or not self.clone then return end
+	local ok, cf, sz = pcall(function() return self.clone:GetBoundingBox() end)
+	if not ok or not cf then return end
+	local dist = math.max(sz.X, sz.Y, sz.Z) * 2.5
+	local center = cf.Position + Vector3.new(0, sz.Y * 0.05, 0)
+	self.camera.CFrame = CFrame.new(center + Vector3.new(dist*0.25, sz.Y*0.15, dist), center)
+end
+
+-- ── Onion skin ────────────────────────────────────────────────
+function ViewportController:clearGhosts()
+	for _, g in ipairs(self.ghosts) do pcall(function() g:Destroy() end) end
+	self.ghosts = {}
+end
+
+-- ghostData: { { t, alpha, isBefore }, ... }  from AnimController:getOnionTimes()
+function ViewportController:updateOnionSkin(rigCtrl, animCtrl, ghostData)
+	self:clearGhosts()
+	if not self.clone or not self.vpFrame then return end
+	for _, gd in ipairs(ghostData) do
+		local ok, ghost = pcall(function() return self.clone:Clone() end)
+		if not ok or not ghost then continue end
+
+		-- Apply evaluated pose to ghost
+		for uname in pairs(rigCtrl.joints) do
+			local cf = animCtrl:evaluate(uname, gd.t)
+			if cf then
+				-- find matching joint in ghost
+				local info = rigCtrl.joints[uname]
+				local jn = info.joint.Name
+				local pn = info.joint.Parent and info.joint.Parent.Name or ""
+				for _, d in ipairs(ghost:GetDescendants()) do
+					if d.Name == jn and (d.Parent and d.Parent.Name or "") == pn then
+						pcall(function() d.C0 = cf end); break
+					end
+				end
+			end
+		end
+
+		-- Tint ghost parts
+		local col = gd.isBefore
+			and Color3.fromRGB(180, 180, 180)
+			or  Color3.fromRGB(120, 120, 120)
+		for _, p in ipairs(ghost:GetDescendants()) do
+			if p:IsA("BasePart") then
+				p.Color = col
+				p.Transparency = 0.55 + (1 - gd.alpha) * 0.3
+				p.CastShadow = false
+			end
+			if p:IsA("Decal") or p:IsA("Texture") or p:IsA("SpecialMesh") then
+				pcall(function() p:Destroy() end)
+			end
+		end
+
+		-- Disable scripts in ghost
+		for _, s in ipairs(ghost:GetDescendants()) do
+			if s:IsA("BaseScript") or s:IsA("ModuleScript") then s.Disabled = true end
+		end
+
+		ghost.Parent = self.vpFrame
+		table.insert(self.ghosts, ghost)
+	end
+end
+
+function ViewportController:destroy()
+	if self.clone then self.clone:Destroy(); self.clone = nil end
+	self:clearGhosts()
+	self.cloneMap = {}
+end
+
+return ViewportController

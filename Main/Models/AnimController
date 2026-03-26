@@ -1,0 +1,164 @@
+-- Modules/AnimController.lua
+local AnimController = {}
+AnimController.__index = AnimController
+
+local function smooth(t) t = math.clamp(t,0,1); return t*t*(3-2*t) end
+local function sortTrack(tr) table.sort(tr, function(a,b) return a.t < b.t end) end
+
+function AnimController.new()
+	return setmetatable({
+		keyframes    = {},   -- [name] = { {t, cf}, ... }
+		duration     = 2,
+		looping      = false,
+		onionBefore  = 2,
+		onionAfter   = 2,
+		onionStep    = 0.1,
+		onionEnabled = false,
+	}, AnimController)
+end
+
+-- ── Track access ──────────────────────────────────────────────
+function AnimController:track(name)
+	if not self.keyframes[name] then self.keyframes[name] = {} end
+	return self.keyframes[name]
+end
+
+function AnimController:count(name)
+	local t = self.keyframes[name]; return t and #t or 0
+end
+
+function AnimController:getAt(name, t)
+	for _, kf in ipairs(self:track(name)) do
+		if math.abs(kf.t - t) < 0.001 then return kf end
+	end
+end
+
+-- ── Mutations ─────────────────────────────────────────────────
+function AnimController:set(name, t, cf)
+	local tr = self:track(name)
+	for _, kf in ipairs(tr) do
+		if math.abs(kf.t - t) < 0.001 then kf.cf = cf; return end
+	end
+	table.insert(tr, {t=t, cf=cf}); sortTrack(tr)
+end
+
+function AnimController:remove(name, t)
+	local tr = self.keyframes[name]; if not tr then return end
+	for i, kf in ipairs(tr) do
+		if math.abs(kf.t - t) < 0.001 then table.remove(tr, i); return true end
+	end
+end
+
+function AnimController:move(name, oldT, newT)
+	local tr = self.keyframes[name]; if not tr then return end
+	for _, kf in ipairs(tr) do
+		if math.abs(kf.t - oldT) < 0.001 then kf.t = newT; sortTrack(tr); return true end
+	end
+end
+
+-- ── Evaluation ───────────────────────────────────────────────
+function AnimController:evaluate(name, t)
+	local tr = self.keyframes[name]
+	if not tr or #tr == 0 then return nil end
+	if #tr == 1 then return tr[1].cf end
+	if t <= tr[1].t then return tr[1].cf end
+	if t >= tr[#tr].t then return tr[#tr].cf end
+	for i = 1, #tr-1 do
+		local a, b = tr[i], tr[i+1]
+		if t >= a.t and t <= b.t then
+			local alpha = (b.t - a.t) > 0 and (t-a.t)/(b.t-a.t) or 0
+			return a.cf:Lerp(b.cf, smooth(alpha))
+		end
+	end
+end
+
+-- ── Onion skin times ──────────────────────────────────────────
+function AnimController:getOnionTimes(currentT)
+	if not self.onionEnabled then return {} end
+	local out = {}
+	for i = 1, self.onionBefore do
+		local t = currentT - i * self.onionStep
+		if t >= 0 then
+			table.insert(out, { t=t, alpha=1-(i/(self.onionBefore+1)), isBefore=true })
+		end
+	end
+	for i = 1, self.onionAfter do
+		local t = currentT + i * self.onionStep
+		if t <= self.duration then
+			table.insert(out, { t=t, alpha=1-(i/(self.onionAfter+1)), isBefore=false })
+		end
+	end
+	return out
+end
+
+function AnimController:clear() self.keyframes = {} end
+
+-- ── Export ────────────────────────────────────────────────────
+-- BUG FIX: PoseEasingStyle.CubicInOut does not exist in Roblox.
+-- The correct values are Enum.PoseEasingStyle.Cubic + Enum.PoseEasingDirection.InOut.
+-- Also AuthoredHipHeight is wrapped in pcall since it may not exist on older API versions.
+function AnimController:export(joints)
+	local seq = Instance.new("KeyframeSequence")
+	seq.Loop = self.looping
+	seq.Name = "Animation"
+
+	-- AuthoredHipHeight doesn't exist in all API versions; safe-call it
+	pcall(function() seq.AuthoredHipHeight = 2.35 end)
+
+	-- Collect every time that has at least one keyframe (always include t=0)
+	local timeSet = {[0] = 0}
+	for _, tr in pairs(self.keyframes) do
+		for _, kf in ipairs(tr) do
+			timeSet[math.round(kf.t * 10000)] = kf.t
+		end
+	end
+
+	-- Build Part1 → unique joint name map so we can resolve parent hierarchy
+	local part1ToName = {}
+	for name, info in pairs(joints) do
+		local ok, p1 = pcall(function() return info.joint.Part1 end)
+		if ok and p1 then part1ToName[p1] = name end
+	end
+
+	-- For each joint, which other joint is its "parent" in pose hierarchy
+	local parentOf = {}
+	for name, info in pairs(joints) do
+		local ok, p0 = pcall(function() return info.joint.Part0 end)
+		if ok and p0 then parentOf[name] = part1ToName[p0] end
+	end
+
+	for _, t in pairs(timeSet) do
+		local kfInst = Instance.new("Keyframe")
+		kfInst.Time = t
+
+		local poseMap = {}
+		for name, info in pairs(joints) do
+			-- Use keyframe value if it exists at this time, otherwise evaluate (interpolate)
+			local cf = self:evaluate(name, t)
+			-- Fall back to origC0 at t=0 if no keyframe data at all
+			if not cf and t == 0 then cf = info.origC0 end
+
+			if cf then
+				local p = Instance.new("Pose")
+				p.Name            = info.joint.Name
+				p.CFrame          = cf
+				-- FIX: CubicInOut is not a valid PoseEasingStyle. Use Cubic + InOut direction.
+				p.EasingStyle     = Enum.PoseEasingStyle.Cubic
+				p.EasingDirection = Enum.PoseEasingDirection.InOut
+				poseMap[name]     = p
+			end
+		end
+
+		-- Parent poses into hierarchy (child pose → parent pose → Keyframe)
+		for name, pose in pairs(poseMap) do
+			local pn = parentOf[name]
+			pose.Parent = (pn and poseMap[pn]) or kfInst
+		end
+
+		kfInst.Parent = seq
+	end
+
+	return seq
+end
+
+return AnimController

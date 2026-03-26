@@ -1,0 +1,36 @@
+-- Modules/TimelineController.lua
+local TimelineController = {}
+TimelineController.__index = TimelineController
+
+local SNAP = 0.05
+
+function TimelineController.new()
+	return setmetatable({
+		zoom      = 1,
+		snap      = true,
+		selected  = {},   -- { ["name|idx"] = true }
+		clipboard = nil,  -- { name, cf }
+	}, TimelineController)
+end
+
+function TimelineController:snapTime(t)
+	if self.snap then return math.round(t / SNAP) * SNAP end
+	return t
+end
+
+function TimelineController:selectKey(name, idx, add)
+	local k = name.."|"..idx
+	if add then
+		self.selected[k] = not self.selected[k] and true or nil
+	else
+		self.selected = { [k] = true }
+	end
+end
+
+function TimelineController:isSelected(name, idx)
+	return self.selected[name.."|"..idx] == true
+end
+
+function TimelineController:clearSelection() self.selected = {} end
+
+return TimelineController

@@ -1,0 +1,152 @@
+-- Modules/RigController.lua
+-- Fixed for R6 + R15. Prints debug to Output window.
+
+local RigController = {}
+RigController.__index = RigController
+
+local function safeGet(j)
+	local ok, v = pcall(function() return j.C0 end)
+	return ok and v or CFrame.new()
+end
+local function safeSet(j, cf)
+	pcall(function() j.C0 = cf end)
+end
+
+-- Collect every Motor6D whose Part0 AND Part1 are real BaseParts
+local function collectMotor6D(container)
+	local out = {}
+	for _, d in ipairs(container:GetDescendants()) do
+		if d:IsA("Motor6D") then
+			local ok, p0, p1 = pcall(function() return d.Part0, d.Part1 end)
+			if ok and p0 and p1 and p0:IsA("BasePart") and p1:IsA("BasePart") then
+				table.insert(out, d)
+			end
+		end
+	end
+	return out
+end
+
+function RigController.new()
+	return setmetatable({
+		model   = nil,
+		active  = nil,
+		joints  = {},
+		partMap = {},
+	}, RigController)
+end
+
+function RigController:load(model)
+	self.model = model; self.active = nil; self.joints = {}; self.partMap = {}
+	for _, j in ipairs(collectMotor6D(model)) do
+		local base = j.Name; local name = base; local i = 1
+		while self.joints[name] do i=i+1; name=base.."_"..i end
+		local p0, p1 = j.Part0, j.Part1
+		self.joints[name] = { joint=j, origC0=safeGet(j), part0=p0, part1=p1 }
+		self.partMap[p1] = name
+	end
+	local n = 0; for _ in pairs(self.joints) do n=n+1 end
+	return n
+end
+
+function RigController:getSortedNames()
+	local t = {}
+	for n in pairs(self.joints) do table.insert(t, n) end
+	table.sort(t); return t
+end
+
+function RigController:setActive(name) self.active = name end
+function RigController:jointForPart(part) return part and self.partMap[part] end
+
+function RigController:getC0(name)
+	local i = self.joints[name]; return i and safeGet(i.joint) or CFrame.new()
+end
+
+function RigController:getDeltaAngles(name)
+	local i = self.joints[name]; if not i then return 0,0,0 end
+	local delta = i.origC0:Inverse() * safeGet(i.joint)
+	local rx,ry,rz = delta:ToEulerAnglesXYZ()
+	return math.deg(rx), math.deg(ry), math.deg(rz)
+end
+
+function RigController:buildC0(name, dx, dy, dz)
+	local i = self.joints[name]; if not i then return CFrame.new() end
+	return i.origC0 * CFrame.fromEulerAnglesXYZ(math.rad(dx), math.rad(dy), math.rad(dz))
+end
+
+function RigController:applyC0(name, cf, cloneMap)
+	local i = self.joints[name]; if not i then return end
+	safeSet(i.joint, cf)
+	if cloneMap and cloneMap[name] then pcall(function() cloneMap[name].C0=cf end) end
+end
+
+function RigController:restoreAll(cloneMap)
+	for name, i in pairs(self.joints) do
+		safeSet(i.joint, i.origC0)
+		if cloneMap and cloneMap[name] then pcall(function() cloneMap[name].C0=i.origC0 end) end
+	end
+end
+
+function RigController:tryLoad(selectionSvc)
+	local tried = {}
+
+	local function attempt(model)
+		if tried[model] then return 0 end
+		tried[model] = true
+		local n = self:load(model)
+		if n > 0 then
+			warn("[RigCtrl] FOUND: "..model:GetFullName().." — "..n.." joints")
+		else
+			-- Count raw Motor6D even if Part0/Part1 are nil, for debug
+			local raw = 0
+			for _, d in ipairs(model:GetDescendants()) do
+				if d:IsA("Motor6D") then raw=raw+1 end
+			end
+			warn("[RigCtrl] skip: "..model:GetFullName().." — 0 valid (raw Motor6D count="..raw..")")
+		end
+		return n
+	end
+
+	-- 1. Selected objects
+	local sel = selectionSvc:Get()
+	warn("[RigCtrl] --- Load attempt. Selection: "..#sel.." objects ---")
+	for _, obj in ipairs(sel) do
+		warn("[RigCtrl] sel: "..obj:GetFullName())
+		if obj:IsA("Model") then
+			local n = attempt(obj); if n>0 then return obj, n end
+		end
+		local anc = obj:FindFirstAncestorWhichIsA("Model")
+		if anc then local n = attempt(anc); if n>0 then return anc, n end end
+	end
+
+	-- 2. Top-level Workspace children
+	warn("[RigCtrl] Trying Workspace top-level...")
+	for _, child in ipairs(game.Workspace:GetChildren()) do
+		if child:IsA("Model") and not tried[child] then
+			local n = attempt(child); if n>0 then return child, n end
+		end
+	end
+
+	-- 3. All nested in Workspace
+	warn("[RigCtrl] Trying Workspace nested...")
+	for _, obj in ipairs(game.Workspace:GetDescendants()) do
+		if obj:IsA("Model") and not tried[obj] then
+			local n = attempt(obj); if n>0 then return obj, n end
+		end
+	end
+
+	-- 4. StarterPlayer / StarterCharacter
+	local sp = game:FindService("StarterPlayer")
+	if sp then
+		warn("[RigCtrl] Trying StarterPlayer...")
+		for _, obj in ipairs(sp:GetDescendants()) do
+			if obj:IsA("Model") and not tried[obj] then
+				local n = attempt(obj); if n>0 then return obj, n end
+			end
+		end
+	end
+
+	warn("[RigCtrl] FAILED — no Motor6D found anywhere.")
+	return nil, 0
+end
+
+return RigController
